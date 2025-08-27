@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>🛒 Boodschappenlijst Dione — PDF Export</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root{
+  --bg:#f9f9f9;--text:#333;--sec:#fff;--header:#2c5530;--header-text:#fff;
+  --btn-bg:#2c5530;--btn-text:#fff;--border:#ddd;--accent:#2c5530;
+}
+body{margin:0;padding:15px;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);}
+h1,h2{color:var(--header);margin:0 0 10px;font-size:1.2em;}
+.section{background:var(--sec);padding:10px;margin-bottom:15px;border-radius:10px;box-shadow:0 1px 5px rgba(0,0,0,0.06);border:1px solid var(--border);}
+form{display:flex;flex-wrap:wrap;gap:10px;}
+form label{flex:1 1 100%;display:flex;flex-direction:column;font-size:14px;}
+input,select,textarea,button{font-size:14px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:inherit;color:inherit;}
+button{background:var(--btn-bg);color:var(--btn-text);border:none;cursor:pointer;padding:10px;border-radius:999px;width:100%;}
+button.secondary{background:transparent;color:var(--accent);border:1px solid var(--accent);}
+button:hover{opacity:.9;}
+.spreadsheet-container{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;min-width:800px;}
+th,td{border:1px solid var(--border);padding:6px;text-align:center;font-size:12px;}
+th{background:var(--header);color:var(--header-text);}
+.product-name{text-align:left;}
+input[type="number"]{width:60px;}
+.total-row td{font-weight:bold;}
+@media (max-width:480px){
+  th,td{padding:4px;font-size:11px;}
+  input[type="number"]{width:50px;}
+  button{padding:8px;font-size:13px;}
+}
+</style>
+</head>
+<body>
+<h1>🛒 Boodschappenlijst Dione</h1>
+
+<div class="section">
+  <button id="exportPdfBtn">Exporteer PDF</button>
+</div>
+
+<div class="section">
+<h2>Deelnemers</h2>
+<form id="participantForm">
+  <label>Naam deelnemer
+    <input type="text" id="participantName" placeholder="Bijv. Saskia…" required>
+  </label>
+  <label>Type deelnemer
+    <select id="participantType">
+      <option value="Kind">Kind</option>
+      <option value="Volwassene">Volwassene</option>
+    </select>
+  </label>
+  <button type="submit">Voeg deelnemer toe</button>
+</form>
+
+<label>Deelnemers
+  <select id="participantsDropdown" size="5">
+  </select>
+</label>
+<button id="removeParticipantBtn">Verwijder geselecteerde deelnemer</button>
+</div>
+
+<div class="section">
+<h2>Nieuw product toevoegen</h2>
+<form id="productForm">
+  <label>Productnaam
+    <input type="text" id="productName" placeholder="Bijv. Eieren…" required>
+  </label>
+  <label>Eenheid
+    <input type="text" id="productUnit" placeholder="bijv. kilo, pak" required>
+  </label>
+  <label>Consumptie p/kind p/d
+    <input type="number" id="productConsumption" step="0.01" required>
+  </label>
+  <label>Prijs p/e (€)
+    <input type="number" id="productPrice" step="0.01" placeholder="0.00">
+  </label>
+  <button type="submit">Voeg product toe</button>
+</form>
+</div>
+
+<div class="section spreadsheet-container">
+<table>
+<thead>
+<tr>
+<th>Product</th><th>Eenheid</th><th>Prijs</th><th>Voorraad</th>
+<th>Te bestellen</th><th>2 dagen</th><th>5 dagen</th><th>7 dagen</th>
+<th>Actueel</th><th>Totaal (€)</th><th>Verwijder</th>
+</tr>
+</thead>
+<tbody id="tableBody"></tbody>
+<tfoot>
+<tr class="total-row">
+<td colspan="9">Totaal</td><td id="totalCost">0.00</td><td></td>
+</tr>
+</tfoot>
+</table>
+</div>
+
+<script>
+let participants = JSON.parse(localStorage.getItem('participants')) || [];
+let products = JSON.parse(localStorage.getItem('products')) || [];
+let adultFactor = 1.5;
+
+const el = {
+  participantForm: document.getElementById('participantForm'),
+  participantName: document.getElementById('participantName'),
+  participantType: document.getElementById('participantType'),
+  participantsDropdown: document.getElementById('participantsDropdown'),
+  removeParticipantBtn: document.getElementById('removeParticipantBtn'),
+  productForm: document.getElementById('productForm'),
+  productName: document.getElementById('productName'),
+  productUnit: document.getElementById('productUnit'),
+  productConsumption: document.getElementById('productConsumption'),
+  productPrice: document.getElementById('productPrice'),
+  tableBody: document.getElementById('tableBody'),
+  totalCost: document.getElementById('totalCost'),
+  exportPdfBtn: document.getElementById('exportPdfBtn')
+};
+
+// Standaard data als leeg
+if(!participants.length){
+  for(let i=1;i<=15;i++) participants.push({name:`Kind ${i}`, type:'Kind'});
+  for(let i=1;i<=4;i++) participants.push({name:`Volwassene ${i}`, type:'Volwassene'});
+}
+if(!products.length){
+  const defaultProducts = [
+    {product:'Brood (volkoren)', unit:'brood', consumption:0.15, price:2.10, inventory:0, actual:0},
+    {product:'Boter', unit:'pakje', consumption:0.02, price:2.50, inventory:0, actual:0},
+    {product:'Hagelslag', unit:'doos', consumption:0.05, price:1.80, inventory:0, actual:0},
+    {product:'Pindakaas', unit:'pot', consumption:0.03, price:3.20, inventory:0, actual:0},
+    {product:'Jam', unit:'pot', consumption:0.02, price:2.75, inventory:0, actual:0},
+    {product:'Cornflakes', unit:'pak', consumption:0.04, price:3.00, inventory:0, actual:0},
+    {product:'Melk', unit:'liter', consumption:0.2, price:0.95, inventory:0, actual:0},
+    {product:'Yoghurt', unit:'bak', consumption:0.25, price:0.60, inventory:0, actual:0},
+    {product:'Eieren', unit:'stuk', consumption:0.3, price:0.30, inventory:0, actual:0},
+    {product:'Sinaasappelsap', unit:'liter', consumption:0.15, price:1.50, inventory:0, actual:0},
+    {product:'Kaas', unit:'plak', consumption:0.05, price:1.80, inventory:0, actual:0},
+    {product:'Ham', unit:'plak', consumption:0.04, price:2.00, inventory:0, actual:0},
+    {product:'Appels', unit:'stuk', consumption:0.2, price:0.60, inventory:0, actual:0},
+    {product:'Bananen', unit:'stuk', consumption:0.2, price:0.50, inventory:0, actual:0},
+    {product:'Chocolademelk', unit:'liter', consumption:0.15, price:1.20, inventory:0, actual:0},
+  ];
+  products = defaultProducts.map(p=>({...p}));
+}
+
+// --- Functies ---
+function computeWeightedCount(){
+  const kids = participants.filter(p=>p.type==='Kind').length;
+  const adults = participants.filter(p=>p.type==='Volwassene').length;
+  return kids + adultFactor * adults;
+}
+
+function saveStorage(){
+  localStorage.setItem('participants', JSON.stringify(participants));
+  localStorage.setItem('products', JSON.stringify(products));
+}
+
+function updateParticipantsDropdown(){
+  el.participantsDropdown.innerHTML = '';
+  participants.forEach((p,i)=>{
+    const opt = document.createElement('option');
+    opt.value=i;
+    opt.textContent=`${p.name} (${p.type})`;
+    el.participantsDropdown.appendChild(opt);
+  });
+}
+
+function generateTable(){
+  el.tableBody.innerHTML='';
+  const weight = computeWeightedCount();
+  let total=0;
+  products.forEach((item,i)=>{
+    const base=item.consumption*weight;
+    const toOrder=Math.max(Math.ceil(base)-item.inventory||0,0);
+    const wkd=Math.max(Math.ceil(base*2)-item.inventory||0,0);
+    const k5=Math.max(Math.ceil(base*5)-item.inventory||0,0);
+    const k7=Math.max(Math.ceil(base*7)-item.inventory||0,0);
+    const cost = toOrder*item.price;
+    total += cost;
+    const row=document.createElement('tr');
+    row.innerHTML=`
+      <td>${item.product}</td>
+      <td>${item.unit}</td>
+      <td>${item.price.toFixed(2)}</td>
+      <td><input type="number" min="0" value="${item.inventory||0}" onchange="updateInventory(${i},this.value)"></td>
+      <td>${toOrder}</td>
+      <td>${wkd}</td>
+      <td>${k5}</td>
+      <td>${k7}</td>
+      <td><input type="number" min="0" value="${item.actual||0}" onchange="updateActual(${i},this.value)"></td>
+      <td>${cost.toFixed(2)}</td>
+      <td><button onclick="removeProduct(${i})" class="secondary">✖</button></td>
+    `;
+    el.tableBody.appendChild(row);
+  });
+  el.totalCost.textContent = total.toFixed(2);
+  saveStorage();
+}
+
+// --- Event listeners ---
+el.participantForm.addEventListener('submit',e=>{
+  e.preventDefault();
+  const name=el.participantName.value.trim();
+  if(!name) return;
+  participants.push({name,type:el.participantType.value});
+  el.participantForm.reset();
+  updateParticipantsDropdown();
+  generateTable();
+  saveStorage();
+});
+
+el.removeParticipantBtn.addEventListener('click',()=>{
+  const idx = el.participantsDropdown.value;
+  if(idx!==null){
+    participants.splice(idx,1);
+    updateParticipantsDropdown();
+    generateTable();
+    saveStorage();
+  }
+});
+
+el.productForm.addEventListener('submit',e=>{
+  e.preventDefault();
+  const name=el.productName.value.trim();
+  const unit=el.productUnit.value.trim();
+  const cons=parseFloat(el.productConsumption.value);
+  const price=parseFloat(el.productPrice.value)||0;
+  if(!name||!unit||isNaN(cons)) return;
+  products.push({product:name,unit,consumption:cons,price,inventory:0,actual:0});
+  el.productForm.reset();
+  generateTable();
+});
+
+function updateInventory(i,val){
+  products[i].inventory=parseFloat(val)||0;
+  generateTable();
+}
+
+function updateActual(i,val){
+  products[i].actual=parseFloat(val)||0;
+  generateTable();
+}
+
+el.exportPdfBtn.addEventListener('click',()=>{
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(16);
+  doc.text("🛒 Boodschappenlijst",14,20);
+  doc.setFontSize(12);
+  const today = new Date().toLocaleDateString();
+  doc.text(`Datum: ${today}`,14,28);
+  let y=36;
+  const weight = computeWeightedCount();
+  products.forEach(item=>{
+    const base=item.consumption*weight;
+    const toOrder=Math.max(Math.ceil(base)-item.inventory||0,0);
+    const wkd=Math.max(Math.ceil(base*2)-item.inventory||0,0);
+    const k5=Math.max(Math.ceil(base*5)-item.inventory||0,0);
+    const k7=Math.max(Math.ceil(base*7)-item.inventory||0,0);
+    const cost = (toOrder*item.price).toFixed(2);
+    if(toOrder>0){
+      doc.text(`${item.product} | T: ${toOrder} | 2d: ${wkd} | 5d: ${k5} | 7d: ${k7} | €${cost}`,14,y);
+      y+=7;
+      if(y>280){doc.addPage();y=20;}
+    }
+  });
+  doc.save("boodschappenlijst.pdf");
+});
+
+// --- Init ---
+updateParticipantsDropdown();
+generateTable();
+</script>
+</body>
+</html>
