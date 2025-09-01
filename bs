@@ -1,0 +1,401 @@
+
+
+/* =========================
+   Deelnemers instellingen
+========================= */
+let numChildren = parseInt(localStorage.getItem('numChildren')) || 0;
+let numAdults   = parseInt(localStorage.getItem('numAdults'))   || 0;
+const adultFactor = 1.5;
+
+/* =========================
+   Producten instellingen
+========================= */
+let products = JSON.parse(localStorage.getItem('products')) || [];
+if (!products.length) {
+  const defaults = [
+    { product:'Brood (volkoren)', unit:'brood', consumption:0.15, price:2.10, inventory:0, actual:0, type:'Vers' },
+    { product:'Boter',            unit:'pakje', consumption:0.02, price:2.50, inventory:0, actual:0, type:'Houdbaar' },
+    { product:'Kaas',             unit:'plak',  consumption:1.5,  price:0.30, inventory:0, actual:0, type:'Vers' },
+    { product:'Melk',             unit:'liter', consumption:0.2,  price:1.10, inventory:0, actual:0, type:'Vers' }
+  ];
+  products = defaults.map(p => ({...p}));
+} else {
+  // Normaliseer geladen data
+  products = products.map(p => ({
+    product: p.product || '',
+    unit: p.unit || '',
+    consumption: Number(p.consumption) || 0,
+    price: Number(p.price) || 0,
+    inventory: Math.max(0, parseInt(p.inventory,10) || 0),
+    actual: Math.max(0, parseInt(p.actual,10) || 0),
+    type: p.type || 'Vers'
+  }));
+}
+
+/* =========================
+   Opslaan naar localStorage
+========================= */
+function saveStorage() {
+  localStorage.setItem('numChildren', String(numChildren));
+  localStorage.setItem('numAdults', String(numAdults));
+  localStorage.setItem('products', JSON.stringify(products));
+}
+
+/* =========================
+   Helpers
+========================= */
+function computeWeightedCount() {
+  return numChildren + adultFactor * numAdults;
+}
+function ceilNeed(p, days, weight) {
+  return Math.ceil((Number(p.consumption) || 0) * weight * days);
+}
+/** Trek voorraad (integer, ≥0) af van berekende behoefte; nooit < 0 */
+function needMinusInventory(p, days, weight) {
+  const base = ceilNeed(p, days, weight);
+  const inv  = Math.max(0, Math.floor(Number(p.inventory) || 0));
+  return Math.max(0, base - inv);
+}
+function formatMoney(n) {
+  try {
+    return (Number(n)||0).toLocaleString('nl-NL',{minimumFractionDigits:2, maximumFractionDigits:2});
+  } catch {
+    return String((Math.round((Number(n)||0)*100)/100).toFixed(2));
+  }
+}
+function safeReplaceAllDate(s) {
+  // Safari fallback voor replaceAll
+  return s && s.replace ? s.replace(/\//g,'-') : s;
+}
+
+/* =========================
+   Tabel genereren
+========================= */
+function generateTable() {
+  const tbody = document.getElementById('tableBody');
+  if (!tbody) return;
+
+  tbody.innerHTML = '';
+  const weight = computeWeightedCount();
+
+  // Nieuwe totalen voor 2/5/7 dagen (som van: te kopen hoeveelheid × prijs)
+  let sum2 = 0, sum5 = 0, sum7 = 0;
+
+  products.forEach((p, index) => {
+    const twoDays   = needMinusInventory(p, 2,  weight);
+    const fiveDays  = needMinusInventory(p, 5,  weight);
+    const sevenDays = needMinusInventory(p, 7,  weight);
+
+    const actual = Number(p.actual) || 0;
+    const price  = Number(p.price)  || 0;
+
+    // totalen optellen
+    sum2  += twoDays   * price;
+    sum5  += fiveDays  * price;
+    sum7  += sevenDays * price;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="product-name">${p.product}</td>
+      <td>${p.unit}</td>
+      <td><input type="number" step="0.01" min="0" value="${price}" data-index="${index}" data-field="price"></td>
+      <td><input type="number" step="1" min="0" value="${Math.max(0, Math.floor(p.inventory||0))}" data-index="${index}" data-field="inventory"></td>
+      <td>${twoDays}</td>
+      <td>${fiveDays}</td>
+      <td>${sevenDays}</td>
+      <td><input type="number" step="1" min="0" value="${actual}" data-index="${index}" data-field="actual"></td>
+      <td>
+        <select data-index="${index}" data-field="type">
+          <option value="Vers" ${ (p.type||'Vers')==='Vers' ? 'selected':'' }>Vers</option>
+          <option value="Houdbaar" ${ (p.type||'Vers')==='Houdbaar' ? 'selected':'' }>Houdbaar</option>
+        </select>
+      </td>
+      <td><button class="remove-btn" data-index="${index}" title="Verwijderen">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  // Drie totalen updaten (staan onder de 2/5/7 kolommen)
+  const t2 = document.getElementById('total2');
+  const t5 = document.getElementById('total5');
+  const t7 = document.getElementById('total7');
+  if (t2) t2.textContent = `Totaal (2 dgn): €${formatMoney(sum2)}`;
+  if (t5) t5.textContent = `Totaal (5 dgn): €${formatMoney(sum5)}`;
+  if (t7) t7.textContent = `Totaal (7 dgn): €${formatMoney(sum7)}`;
+
+  saveStorage();
+}
+
+/* =========================
+   Verwijderen (event delegation)
+========================= */
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.remove-btn');
+  if (!btn) return;
+  const index = parseInt(btn.dataset.index, 10);
+  if (!Number.isInteger(index) || index < 0 || index >= products.length) return;
+  products.splice(index, 1);
+  generateTable();
+});
+
+/* =========================
+   Inputs live opslaan (delegation)
+========================= */
+function handleEdit(target) {
+  const { field, index } = target.dataset || {};
+  if (!field) return;
+  const idx = parseInt(index, 10);
+  if (!Number.isInteger(idx) || !products[idx]) return;
+
+  if (field === 'type') {
+    products[idx].type = String(target.value || 'Vers');
+  } else if (field === 'inventory') {
+    // Voorraad altijd als integer ≥ 0
+    const val = Math.max(0, parseInt(target.value, 10) || 0);
+    products[idx].inventory = val;
+    target.value = String(val); // toon als heel getal
+  } else if (field === 'price') {
+    products[idx].price = Math.max(0, parseFloat(target.value) || 0);
+  } else if (field === 'actual') {
+    products[idx].actual = Math.max(0, parseInt(target.value, 10) || 0);
+  } else {
+    products[idx][field] = target.value;
+  }
+
+  generateTable(); // herbereken kolommen en totalen
+}
+document.addEventListener('input',  (e)=> handleEdit(e.target));
+document.addEventListener('change', (e)=> handleEdit(e.target)); // fallback voor <select>
+
+/* =========================
+   PDF Export (met fallback)
+========================= */
+function exportToPdfProductsForDays() {
+  const jslib = (window.jspdf || window.jsPDF || {});
+  const jsPDF = jslib.jsPDF || jslib;
+  if (typeof jsPDF !== 'function') {
+    alert('jsPDF niet gevonden. Voeg in je HTML de jsPDF script-tag toe.');
+    return;
+  }
+  const doc = new jsPDF();
+
+  // 1) Kolomkeuze (2 / 5 / 7)
+  const colDaysRaw = prompt(
+    'Uit welke tabelkolom wil je de aantallen nemen?\nKies 2, 5 of 7 (dagen).',
+    '7'
+  );
+  if (colDaysRaw === null) return; // cancel
+  const colDays = parseInt(String(colDaysRaw).trim(), 10);
+  if (![2,5,7].includes(colDays)) {
+    alert('Ongeldige keuze. Kies 2, 5 of 7.');
+    return;
+  }
+
+  const today  = new Date().toLocaleDateString('nl-NL');
+  const weight = computeWeightedCount();
+  const tbody  = document.getElementById('tableBody');
+  let rows = [];
+  let subtitle = '';
+
+  // ====== Direct exporteren als 2 dagen is gekozen ======
+  if (colDays === 2) {
+    if (!tbody || !tbody.rows.length) { alert('Tabel is leeg.'); return; }
+    subtitle = 'Export — aantallen uit 2-dagen kolom';
+    const colIdx = 4; // 2d kolom in de tabel
+    rows = Array.from(tbody.rows).map(tr => {
+      const product = (tr.cells[0]?.textContent || '').trim();
+      const qtyText = (tr.cells[colIdx]?.textContent || '').trim();
+      return ['', product, qtyText || '0'];
+    });
+  } else {
+    // ====== Bij 5 of 7 dagen: vraag nog naar run-type ======
+    const choice = prompt(
+      'Wat wil je exporteren?\n' +
+      `1 = Hele week (kolom uit de tabel: ${colDays} dagen)\n` +
+      '2 = Eerste run (Houdbaar 7d + Vers 1–X)\n' +
+      '3 = Tussentijds (Vers X+1–7)',
+      '1'
+    );
+    if (!['1','2','3'].includes((choice||'').trim())) return;
+
+    if (choice === '1') {
+      if (!tbody || !tbody.rows.length) { alert('Tabel is leeg.'); return; }
+      const colIdxMap = { 5: 5, 7: 6 };
+      const colIdx = colIdxMap[colDays];
+      subtitle = `Hele week — aantallen uit ${colDays}-dagen kolom`;
+      rows = Array.from(tbody.rows).map(tr => {
+        const product = (tr.cells[0]?.textContent || '').trim();
+        const qtyText = (tr.cells[colIdx]?.textContent || '').trim();
+        return ['', product, qtyText || '0'];
+      });
+    }
+
+    if (choice === '2') {
+      const inputX = prompt('Voor hoeveel dagen VERS inkopen in de eerste run? (1–6)', '3');
+      const X = parseInt((inputX||'').trim(), 10);
+      if (!Number.isFinite(X) || X <= 0 || X >= 7) { alert('Kies een getal tussen 1 en 6.'); return; }
+      subtitle = `Eerste run — Houdbaar 7d + Vers 1–${X}`;
+      rows = products.map(p => {
+        const isFresh = (p.type || 'Vers') === 'Vers';
+        const days = isFresh ? X : 7;
+        const qty = needMinusInventory(p, days, weight);
+        return ['', p.product, String(qty)];
+      });
+    }
+
+    if (choice === '3') {
+      const inputX = prompt('Vanaf welke dag start de tussentijdse run? (0–6)  (bijv. 3 ⇒ koop voor 4–7)', '3');
+      const X = parseInt((inputX||'').trim(), 10);
+      if (!Number.isFinite(X) || X < 0 || X >= 7) { alert('Kies een getal tussen 0 en 6.'); return; }
+      const remaining = 7 - X;
+      if (remaining <= 0) { alert('Er blijven 0 dagen over.'); return; }
+      subtitle = `Tussentijds — Vers ${X+1}–7 (${remaining} dag(en))`;
+      rows = products
+        .filter(p => (p.type || 'Vers') === 'Vers')
+        .map(p => ['', p.product, String(needMinusInventory(p, remaining, weight))]);
+    }
+  }
+
+  // ====== PDF genereren ======
+  doc.setFontSize(16);
+  doc.text('Boodschappenlijst', 14, 18);
+  doc.setFontSize(11);
+  doc.text(`Datum: ${today}`, 14, 26);
+  doc.text(subtitle, 14, 32);
+
+  const BOX_SIZE = 8;
+  const hasAutoTable = typeof doc.autoTable === 'function';
+
+  if (hasAutoTable) {
+    try {
+      doc.autoTable({
+        head: [[ '', 'Product', 'Hoeveelheid' ]],
+        body: rows,
+        startY: 40,
+        styles: { fontSize: 11, cellPadding: 4 },
+        headStyles: { fillColor: [44, 85, 48], textColor: 255 },
+        columnStyles: {
+          0: { cellWidth: 18, halign: 'center' },
+          1: { cellWidth: 130 },
+          2: { halign: 'right' }
+        },
+        didDrawCell: (data) => {
+          if (data.section === 'body' && data.column.index === 0) {
+            const { x, y, height } = data.cell;
+            const cx = x + (data.cell.width - BOX_SIZE) / 2;
+            const cy = y + (height - BOX_SIZE) / 2;
+            doc.setDrawColor(0);
+            doc.setLineWidth(0.5);
+            doc.rect(cx, cy, BOX_SIZE, BOX_SIZE);
+          }
+        }
+      });
+    } catch (e) {
+      console.warn('autoTable fout, val terug op handmatige tabel:', e);
+      drawManualTable(doc, rows, BOX_SIZE);
+    }
+  } else {
+    drawManualTable(doc, rows, BOX_SIZE);
+  }
+
+  const filename = `boodschappen_${safeReplaceAllDate(today)}.pdf`;
+  try {
+    doc.save(filename);
+  } catch (e) {
+    console.error('doc.save fout:', e);
+    alert('Kon de PDF niet opslaan. Staat jsPDF correct geladen?');
+  }
+}
+
+function drawManualTable(doc, rows, BOX_SIZE) {
+  let y = 44;
+  const PAGE_H = doc.internal.pageSize.getHeight();
+  const PAGE_W = doc.internal.pageSize.getWidth();
+  const MARGIN_L = 14;
+  const MARGIN_R = 14;
+  const GAP = 6;
+
+  // Kopregel
+  doc.setFont(undefined, 'bold');
+  doc.text(' ', MARGIN_L, y);
+  doc.text('Product', MARGIN_L + BOX_SIZE + GAP, y);
+  const wHead = doc.getTextWidth('Hoeveelheid');
+  doc.text('Hoeveelheid', PAGE_W - MARGIN_R - wHead, y);
+  doc.setFont(undefined, 'normal');
+  y += 8;
+
+  const addRow = (prod, qty) => {
+    if (y > PAGE_H - 16) { doc.addPage(); y = 20; }
+    // checkbox
+    doc.setDrawColor(0);
+    doc.setLineWidth(0.5);
+    doc.rect(MARGIN_L, y - (BOX_SIZE - 4), BOX_SIZE, BOX_SIZE);
+    // product
+    doc.text(`${prod}`, MARGIN_L + BOX_SIZE + GAP, y + 2);
+    // qty rechts uitlijnen
+    const w = doc.getTextWidth(String(qty));
+    doc.text(String(qty), PAGE_W - MARGIN_R - w, y + 2);
+    y += 12;
+  };
+
+  rows.forEach(([, prod, qty]) => addRow(prod, qty));
+}
+
+/* =========================
+   DOM Ready
+========================= */
+document.addEventListener('DOMContentLoaded', () => {
+  // init counts
+  const childInput = document.getElementById('childCount');
+  const adultInput = document.getElementById('adultCount');
+  if (childInput) childInput.value = Math.max(0, parseInt(numChildren,10)||0);
+  if (adultInput) adultInput.value = Math.max(0, parseInt(numAdults,10)||0);
+
+  // listeners participants
+  childInput?.addEventListener('input', e => {
+    numChildren = Math.max(0, parseInt(e.target.value,10) || 0);
+    generateTable();
+  });
+  adultInput?.addEventListener('input', e => {
+    numAdults = Math.max(0, parseInt(e.target.value,10) || 0);
+    generateTable();
+  });
+
+  // product form
+  const productFormEl = document.getElementById('productForm');
+  productFormEl?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name  = document.getElementById('productName')?.value.trim() || '';
+    const unit  = document.getElementById('productUnit')?.value.trim() || '';
+    const cons  = parseFloat(document.getElementById('productConsumption')?.value);
+    const price = parseFloat(document.getElementById('productPrice')?.value) || 0;
+    const type  = document.getElementById('productType')?.value || 'Vers';
+
+    if (!name || !unit || !Number.isFinite(cons)) {
+      alert('Vul minimaal Product, Eenheid en Consumptie in.');
+      return;
+    }
+
+    products.push({
+      product: name,
+      unit,
+      consumption: Math.max(0, cons || 0),
+      price: Math.max(0, price || 0),
+      inventory: 0,
+      actual: 0,
+      type
+    });
+
+    // leeg formulier
+    productFormEl.reset();
+    const typeSel = document.getElementById('productType');
+    if (typeSel) typeSel.value = 'Vers';
+    generateTable();
+  });
+
+  // export button
+  document.getElementById('exportPdfBtn')?.addEventListener('click', exportToPdfProductsForDays);
+
+  // eerste render
+  generateTable();
+});
