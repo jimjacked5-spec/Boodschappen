@@ -1,4 +1,138 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Boodschappenlijst Dione — PDF Export</title>
 
+  <style>
+    :root{
+      --bg:#ffffff;--text:#333;--sec:#fff;--header:#2c5530;--header-text:#fff;
+      --btn-bg:#060106;--btn-text:#fff;--border:#ddd;--accent:#2c5530;
+    }
+    body{margin:0;padding:15px;font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);}
+    h1,h2{color:var(--header);margin:0 0 10px;font-size:1.2em;}
+    .section{background:var(--sec);padding:12px;margin-bottom:16px;border-radius:12px;box-shadow:0 1px 6px rgba(0,0,0,.06);border:1px solid var(--border);}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .row > *{flex:1}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:12px}
+    @media (max-width:740px){ .grid{grid-template-columns:1fr} }
+    label{display:flex;flex-direction:column;gap:6px;font-size:14px}
+    input,select,button{
+      font-size:14px;padding:10px;border:1px solid var(--border);border-radius:10px;background:#fff;color:inherit;
+    }
+    button{
+      background:var(--btn-bg);color:var(--btn-text);border:none;cursor:pointer;border-radius:999px;
+      padding:10px 14px;font-weight:600;text-align:center
+    }
+    button.secondary{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+    button:hover{opacity:.92}
+    .spreadsheet-container{overflow-x:auto}
+    table{width:100%;border-collapse:collapse;min-width:800px}
+    th,td{border:1px solid var(--border);padding:6px;text-align:center;font-size:12px}
+    th{background:var(--header);color:var(--header-text)}
+    .product-name{text-align:left}
+    input[type="number"]{width:70px}
+    .total-row td{font-weight:700}
+    .muted{color:#666}
+  </style>
+</head>
+<body>
+  <h1>Boodschappenlijst Dione</h1>
+
+  <!-- Acties -->
+  <div class="section">
+    <div class="row">
+      <button id="exportPdfBtn">Exporteer PDF</button>
+    </div>
+  </div>
+
+  <!-- Deelnemers -->
+  <div class="section">
+    <h2>Deelnemers</h2>
+    <div class="grid">
+      <label>Aantal kinderen
+        <input type="number" id="childCount" min="0" value="0" />
+      </label>
+      <label>Aantal volwassenen
+        <input type="number" id="adultCount" min="0" value="0" />
+      </label>
+    </div>
+  </div>
+
+  <!-- Nieuw product -->
+  <div class="section">
+    <h2>Nieuw product toevoegen</h2>
+    <form id="productForm" class="grid">
+      <label>Productnaam
+        <input type="text" id="productName" placeholder="Bijv. Eieren…" required />
+      </label>
+      <label>Eenheid
+        <input type="text" id="productUnit" placeholder="bijv. kilo, pak" required />
+      </label>
+      <label>Type
+        <select id="productType">
+          <option value="Vers">Vers</option>
+          <option value="Houdbaar">Houdbaar</option>
+        </select>
+      </label>
+      <label>Consumptie p/persoon p/dag
+        <input type="number" id="productConsumption" step="0.01" placeholder="0.15" required />
+      </label>
+      <label>Prijs p/e (€)
+        <input type="number" id="productPrice" step="0.01" placeholder="0.00" />
+      </label>
+      <div style="display:flex;align-items:end">
+        <button type="submit">Voeg product toe</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Tabel -->
+  <div class="section spreadsheet-container">
+    <table>
+      <thead>
+        <tr>
+          <th>Product</th>
+          <th>Eenheid</th>
+          <th>Prijs</th>
+          <th>Voorraad</th>
+          <th>2 dagen</th>
+          <th>5 dagen</th>
+          <th>7 dagen</th>
+          <th>Actueel</th>
+          <th>Type</th>
+          <th>Verwijder</th>
+        </tr>
+      </thead>
+      <tbody id="tableBody"></tbody>
+
+      <!-- Totals: staan direct ONDER de 2/5/7-dagen kolommen -->
+      <tfoot>
+        <!-- lege buffer-rij (optioneel, kun je weglaten) -->
+        <tr><td colspan="10" class="muted"> </td></tr>
+
+        <!-- totals-rij: alleen kolommen 5/6/7 gevuld -->
+        <tr class="total-row">
+          <td></td>
+          <td></td>
+          <td></td>
+          <td style="text-align:right">Totaal kosten →</td>
+          <td id="total2">Totaal (2 dgn): €0,00</td>
+          <td id="total5">Totaal (5 dgn): €0,00</td>
+          <td id="total7">Totaal (7 dgn): €0,00</td>
+          <td></td>
+          <td></td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <!-- Koppel je JS hier -->
+  <script src="index.js"></script>
+</body>
+</html>
 
 /* =========================
    Deelnemers instellingen
